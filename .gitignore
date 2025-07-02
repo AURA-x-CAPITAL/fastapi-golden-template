@@ -1,0 +1,25 @@
+# Python
+__pycache__
+app.egg-info
+*.pyc
+.mypy_cache
+.coverage
+htmlcov
+.cache
+.venv
+
+# IDE
+.idea/
+*.iml
+*.xml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+
+# Other
+tmp/
