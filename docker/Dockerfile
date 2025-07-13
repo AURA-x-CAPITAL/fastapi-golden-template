@@ -1,33 +1,34 @@
-# Builder stage
-FROM python:3.11-slim as builder
+# Install uv
+FROM python:3.12-slim AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /uvx /bin/
+ENV PATH="/app/.venv/bin:$PATH"
+# Compile bytecode
+# Ref: https://docs.astral.sh/uv/guides/integration/docker/#compiling-bytecode
+ENV UV_COMPILE_BYTECODE=1
+# uv Cache
+# Ref: https://docs.astral.sh/uv/guides/integration/docker/#caching
+ENV UV_LINK_MODE=copy
 
-ENV PYTHONFAULTHANDLER=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=on
-
+# Change the working directory to the `app` directory
 WORKDIR /app
 
-# Install UV (ultra-fast installer)
-RUN pip install uv==1.1.0
-COPY requirements.txt .
-RUN uv pip install -r requirements.txt --system
+# Install dependencies
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-install-project --no-editable
 
-# ----- Production Stage -----
-FROM gcr.io/distroless/python3-debian11
+# Copy the project into the intermediate image
+ADD . /app
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    APP_ENV=PRODUCTION
+# Sync the project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-editable
 
-WORKDIR /app
+FROM python:3.12-slim
 
-# Copy Python dependencies
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+# Copy the environment, but not the source code
+COPY --from=builder --chown=app:app /app/.venv /app/.venv
 
-# Copy application
-COPY . .
-
-# Non-root user for security
-USER 65534:65534  # distroless default non-root user
-
-CMD ["app/main.py"]
+# Run the application
+CMD ["/app/.venv/bin/hello"]

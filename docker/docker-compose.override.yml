@@ -1,0 +1,85 @@
+services:
+  # --- overwrite backend service ---
+  backend:
+    image: python:3.12-slim
+    restart: always
+    volumes:
+      - ../src:/app
+    command: uvicorn app.nft_api.main:app --reload --host 0.0.0.0 --port 8000
+
+  # --- frontend service ---
+  frontend:
+    image: ghcr.io/aura-x-capital/<repo-name>:latest
+    restart: always
+    ports:
+      - "8080:8000"
+    environment:
+      VITE_API_URL: "http://localhost:8000"
+      NODE_ENV: "development"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: no
+    volumes:
+      - postgres:/data/postgres
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    environment:
+      PGDATA: /data/postgres
+      PGPORT: 5433
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    expose:
+      - "5433:5433"
+    ports:
+      - "5433:5433"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+
+  pgbouncer:
+    image: bitnami/pgbouncer:1
+    container_name: pgbouncer
+    restart: no
+    environment:
+      PGBOUNCER_AUTH_TYPE: "md5"
+      PGBOUNCER_DATABASE: "${POSTGRES_DB}"
+      PGBOUNCER_DEFAULT_POOL_SIZE: 20
+      PGBOUNCER_PORT: "5432"
+      POSTGRESQL_HOST: "postgres"
+      POSTGRESQL_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRESQL_PORT: "5433"
+      POSTGRESQL_USERNAME: "${POSTGRES_USER}"
+    expose:
+      - "5432:5432"
+    ports:
+      - "5432:5432"
+    depends_on:
+      - postgres
+
+  redis:
+    image: docker.io/bitnami/redis:7.4
+    container_name: redis
+    restart: no
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+      REDIS_RDB_POLICY_DISABLED: yes
+      REDIS_AOF_ENABLED: no
+    expose:
+      - "6379:6379"
+
+  rabbitmq:
+    image: bitnami/rabbitmq:4.1.1-debian-12-r2
+    container_name: rabbitmq
+    restart: always
+    ports:
+      - 5672:5672
+      - 15672:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: "${RMQ_USER}"
+      RABBITMQ_DEFAULT_PASS: "${RMQ_PASSWORD}"
+
+volumes:
+  postgres:

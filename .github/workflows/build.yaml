@@ -1,0 +1,249 @@
+name: 'CI: Tests, Build and Push'
+
+on:
+  workflow_dispatch:
+    inputs:
+      dev_env:
+        description: 'Deploy to the Dev env'
+        default: false
+        required: false
+        type: boolean
+      tests:
+        description: 'Run tests'
+        default: false
+        required: false
+        type: boolean
+
+  push:
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+    branches:
+      - 'main'
+
+  pull_request:
+    branches:
+      - 'main'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  # if the branch is the default branch, set env is prod, otherwise set env is dev
+  ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+
+jobs:
+  tests:
+    name: 'Run tests'
+    runs-on: ubuntu-latest
+    # Disable tests for hotfix branches
+    if: >
+      (github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event.inputs.tests == 'true') &&
+      !contains(github.ref, 'refs/tags/hotfix')
+    steps:
+      - name: 'Checkout GitHub Action'
+        uses: actions/checkout@v4
+        if: github.event_name != 'pull_request'
+
+      - name: 'Checkout GitHub Action'
+        uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=tests
+
+      - name: Convert IMAGE_NAME to lowercase
+        run: echo "IMAGE_NAME=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Build
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          build-args: |
+            ENVIRONMENT=dev-local
+          cache-from: type=gha,scope=shared
+          cache-to: type=gha,mode=max,scope=shared
+          context: .
+          file: ./docker/Dockerfile
+          platforms: linux/arm64 # ,linux/amd64
+          push: false
+          target: tests
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Run local env
+        run: |
+          set -eo pipefail
+
+          printf "Running local env\n"
+          cp docker/template.env docker/.env
+          docker compose -f docker/compose-ci.yaml up -d
+
+          wait_seconds=20
+          printf "Waiting \"%s\" sec for the containers to be up and running\n" "$wait_seconds"
+          sleep "$wait_seconds"
+
+          printf "Checking if the containers are up and running\n"
+          ./docker/healthcheck.sh
+          if [ $? -ne 0 ]; then
+            printf "The containers are not up and running\n"
+            exit 1
+          fi
+
+      - name: Run tests
+        run: |
+          set -eo pipefail
+
+          printf "Running tests\n"
+          docker compose -f docker/compose-ci.yaml exec backend pytest -v --disable-warnings --tb=short --maxfail=1
+
+  image:
+    name: 'Build and push Docker image'
+    runs-on: ubuntu-latest
+    needs: tests
+    if: |
+      always() &&
+      (needs.tests.result == 'success' || needs.tests.result == 'skipped') &&
+      (github.event_name != 'pull_request')
+    outputs:
+      DEPLOY_ENV: ${{ steps.image-description.outputs.DEPLOY_ENV }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: 'Checkout GitHub Action'
+        uses: actions/checkout@v4
+        if: github.event_name != 'pull_request'
+
+      - name: 'Checkout GitHub Action'
+        uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Debug environment variables
+        uses: hmarr/debug-action@v3
+
+      - name: Determine image description for meta data
+        id: image-description
+        run: |
+          # Convert IMAGE_NAME to lowercase
+          echo "IMAGE_NAME=$(echo '${{ env.IMAGE_NAME }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+          # If the headCommitMsg $(git show -s --format=%s) is empty, or less than 5 characters, set a default description
+          if [[ -z "$(git show -s --format=%s)" || $(git show -s --format=%s | wc -c) -lt 5 ]]; then
+            echo "description=AuraX Backend based on the Python FastAPI" >> $GITHUB_OUTPUT
+          else
+            echo "description=headCommitMsg:$(git show -s --format=%s)" >> $GITHUB_OUTPUT
+          fi
+
+          # Helper for the deploy job:
+          if [[ "${{ github.event.inputs.dev_env }}" == "true" ]]; then
+            echo "DEPLOY_ENV=dev" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "DEPLOY_ENV=prod" >> $GITHUB_OUTPUT
+          else
+            echo "DEPLOY_ENV=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        env:
+          DOCKER_METADATA_SHORT_SHA_LENGTH: 8
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            # dynamically set the branch name as a prefix
+            # date +%s ; 1611840548
+            # <branch>-<sha1>-<timestamp>
+            # tag event
+            type=ref,enable=true,priority=600,event=tag
+            # if inputs.environment is set to dev, set the tag (feat-preview)-[a-fA-F0-9]+-(?P<ts>.*)
+            type=raw,value=feat-preview-{{sha}}-{{date 'X'}},enable=${{ github.event_name != 'pull_request' && github.event.inputs.dev_env == 'true' }}
+
+            type=raw,value={{branch}}-{{sha}}-{{date 'X'}},enable=${{ github.event_name != 'pull_request' }},event=branch
+          flavor: |
+            latest=auto
+          labels: |
+            maintainer=https://github.com/kksudo/
+            org.opencontainers.image.created={{commit_date 'YYYY-MM-DDTHH:mm:ss.SSS[Z]'}}
+            org.opencontainers.image.description=${{ steps.image-description.outputs.description }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=${{ github.repository }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          build-args: |
+            ENVIRONMENT=${{ env.ENVIRONMENT }}
+          cache-from: type=gha,scope=shared
+          cache-to: type=gha,mode=max,scope=shared
+          context: .
+          file: ./docker/Dockerfile
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/arm64 # ,linux/amd64
+          push: ${{ github.event_name != 'pull_request' || github.event.inputs.dev_env == 'true' || 'false' }}
+          target: base
+          tags: ${{ steps.meta.outputs.tags }}
+
+      - name: Adding a job summary using Markdown
+        run: |
+          if [ "${{ env.ENVIRONMENT }}" == "prod" ]; then
+            API_URL="https://game-backend-v2.auraxterminal.com"
+          else
+            API_URL="https://game-backend-v2.dev.auraxterminal.com"
+          fi
+          IMAGE_TAG=${{ steps.meta.outputs.version }}
+          BACKEND_IMAGE=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${IMAGE_TAG}" | tr '[:upper:]' '[:lower:]')
+
+          echo "## Job Summary" >> $GITHUB_STEP_SUMMARY
+          echo "URL: ${API_URL}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Image: [${BACKEND_IMAGE}](https://github.com/${{ github.repository }}/pkgs/container/auraxgame-backend)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+  deploy:
+    name: 'Deploy to Kubernetes'
+    runs-on: ubuntu-latest
+    needs: image
+    if: ${{ needs.image.outputs.DEPLOY_ENV != 'false' }}
+    steps:
+      # This job needs just to highlight that the FluxCD has been triggered to deploy the new image to the Kubernetes cluster
+      - name: 'Trigger FluxCD to deploy a new image'
+        run: |
+          printf "The FluxCD has been triggered to deploy the new image to the ${{ needs.image.outputs.DEPLOY_ENV }} environment.\n"
+          printf "## Deploy Summary\n" >> $GITHUB_STEP_SUMMARY
+          printf "The FluxCD has been triggered to deploy the new image to the ${{ needs.image.outputs.DEPLOY_ENV }} environment.\n" >> $GITHUB_STEP_SUMMARY
+          printf "\n" >> $GITHUB_STEP_SUMMARY

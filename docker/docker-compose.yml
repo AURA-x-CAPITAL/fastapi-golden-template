@@ -1,0 +1,46 @@
+services:
+  backend:
+    container_name: backend
+    restart: no
+    image: "auragame-backend:current"
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+      args:
+        ENVIRONMENT: ${ENVIRONMENT}
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -s -f http://localhost:8000/health || exit 1" ]
+      interval: 3s
+      retries: 5
+      timeout: 10s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+
+  migrations:
+    container_name: migrations
+    restart: no
+    image: "auragame-backend:current"
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        alembic upgrade head
+        /bin/bash || exit 0
