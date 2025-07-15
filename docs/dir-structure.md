@@ -19,10 +19,37 @@ fastapi-golden-template/
     ├── .env.template          # Environment variable template
     ├── .gitignore             # Source-specific ignores
     ├── app/                   # Core application module
+    │   ├── api/               # Routers
+    │   │   ├── deps.py        # Common dependencies (e.g., get_db, auth)
+    │   │   ├── main.py        # Router assembly
+    │   │   ├── v1/            # Versioned API
+    │   │   │   ├── __init__.py 
+    │   │   │   └── users.py   # Router for users
+    │   ├── core/              # Application core
+    │   │   ├── config.py      # Loading and validating environment variables
+    │   │   ├── security.py    # JWT, OAuth, etc.
+    │   │   └── logging.py     # Logging configuration
+    │   ├── db/ 
+    │   │   ├── base.py        # Basic SQLAlchemy models (Base = declarative_base())
+    │   │   ├── session.py     # Session creation (get_db)
+    │   │   └── migrations/    # Alembic migrations
+    │   ├── models/            # SQLAlchemy models (ORM)
+    │   │   ├── __init__.py
+    │   │   └── user.py
+    │   ├── repositories/      # Database queries
+    │   │   ├── __init__.py
+    │   │   └── user_repository.py
+    │   ├── schemas/           # Pydantic Schemas (DTO)
+    │   │   ├── __init__.py
+    │   │   └── user.py
+    │   ├── services/          # Business logic (use cases)
+    │   │   ├── __init__.py
+    │   │   └── user_service.py
     │   ├── __init__.py        # Package initialization
     │   ├── alembic/           # Database migration scripts
     │   ├── backend_pre_start.py # Pre-launch checks
     │   ├── main.py            # Application entry point
+    │   ├── dependencies.py    # Global dependencies (auth, DB, etc.)
     │   ├── shutdown.py        # Graceful termination handlers
     │   ├── tests/             # Test suite
     ├── pyproject.toml         # Dependency and tool configuration
