@@ -57,7 +57,7 @@ uv sync --no-dev
 ## Health Check Endpoint
 
 A health check endpoint is available at `/health`.
-File: [src/app/api/routes/utils.py](../src/app/api/routes/utils.py)
+File: [src/app/api/routes/utils.py](../src/app/api/v1/utils.py)
 
 ## Pre-start Initialization
 

@@ -1,5 +1,6 @@
 import secrets
 import warnings
+from functools import lru_cache
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -59,9 +60,21 @@ class Settings(BaseSettings):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def SQLALCHEMY_DATABASE_URI(self) -> PostgresDsn:
+    def SQLALCHEMY_SYNC_DATABASE_URI(self) -> PostgresDsn:
         return MultiHostUrl.build(
             scheme="postgresql+psycopg",
+            username=self.POSTGRES_USER,
+            password=self.POSTGRES_PASSWORD,
+            host=self.POSTGRES_SERVER,
+            port=self.POSTGRES_PORT,
+            path=self.POSTGRES_DB,
+        )
+
+    @computed_field
+    @property
+    def SQLALCHEMY_ASYNC_DATABASE_URI(self) -> str:
+        return MultiHostUrl.build(
+            scheme="postgresql+asyncpg",
             username=self.POSTGRES_USER,
             password=self.POSTGRES_PASSWORD,
             host=self.POSTGRES_SERVER,
@@ -117,4 +130,6 @@ class Settings(BaseSettings):
         return self
 
 
-settings = Settings()  # type: ignore
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()

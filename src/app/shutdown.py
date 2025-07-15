@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 from app.core.logging import logger
-from app.db.session import engine
+from app.db.session import engine, init_db
 from app.utils.redis import get_redis_client
+from app.core.config import get_settings
 
 
 @asynccontextmanager
@@ -9,9 +10,9 @@ async def lifespan_manager(app: FastAPI):
     """Manage application lifespan events"""
     logger.info("Application startup initiated")
 
+    settings = get_settings()
     # Initialize services
-    await init_db()
-    await init_redis()
+    await init_db(settings.SQLALCHEMY_ASYNC_DATABASE_URI)
 
     yield  # Application runs here
 
