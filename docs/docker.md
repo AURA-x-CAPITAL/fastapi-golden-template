@@ -1,7 +1,7 @@
 # Docker
 
 Use the docker for the cross-platform development and deployment.
-On the same time you cah use docker-compose for the local development and set-up all necessary dependencies on the local laptop.
+On the same time you can use docker-compose for the local development and set-up all necessary dependencies on the local laptop.
 
 All docker related files in the `docker` directory.
 
